@@ -20,6 +20,14 @@ import {
   getTradeSummaryHandler,
   listTradesHandler,
 } from './trades/http.js';
+import {
+  authenticateJournalRequest,
+  createJournalEntryHandler,
+  deleteJournalEntryHandler,
+  getJournalEntryHandler,
+  listJournalEntriesHandler,
+  updateJournalEntryHandler,
+} from './journal/http.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === 'production';
@@ -101,6 +109,18 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
     if (method === 'GET' && segments.length === 2) return getTradeHandler(tradeRequest);
     if (method === 'POST' && segments.length === 3 && segments[2] === 'executions') return createExecutionHandler(tradeRequest);
     if (method === 'GET' && segments.length === 3 && segments[2] === 'summary') return getTradeSummaryHandler(tradeRequest);
+  }
+
+  if (url.pathname === '/journal' || url.pathname.startsWith('/journal/')) {
+    const user = await authenticateJournalRequest(authRequest.cookies?.[SESSION_COOKIE]);
+    if (!user) return { status: 401, body: { error: 'UNAUTHENTICATED' } };
+    const entryId = url.pathname.startsWith('/journal/') ? url.pathname.slice('/journal/'.length) : undefined;
+    const journalRequest = { ...authRequest, userId: user.id, entryId };
+    if (method === 'POST' && url.pathname === '/journal') return createJournalEntryHandler(journalRequest);
+    if (method === 'GET' && url.pathname === '/journal') return listJournalEntriesHandler(journalRequest);
+    if (method === 'GET' && entryId) return getJournalEntryHandler(journalRequest);
+    if (method === 'PATCH' && entryId) return updateJournalEntryHandler(journalRequest);
+    if (method === 'DELETE' && entryId) return deleteJournalEntryHandler(journalRequest);
   }
 
   return { status: 404, body: { error: 'NOT_FOUND' } };
