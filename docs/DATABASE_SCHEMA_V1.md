@@ -117,33 +117,22 @@ Purpose: one actual buy/sell execution/fill belonging to a trade. Executions are
 | quantity | NUMERIC | Required; positive |
 | price | NUMERIC | Required; positive |
 | executed_at | TIMESTAMPTZ | Required |
-| brokerage | NUMERIC | Default 0 |
-| stt | NUMERIC | Default 0 |
-| exchange_charges | NUMERIC | Default 0 |
-| sebi_charges | NUMERIC | Default 0 |
-| gst | NUMERIC | Default 0 |
-| stamp_duty | NUMERIC | Default 0 |
-| other_charges | NUMERIC | Default 0 |
-| total_charges | NUMERIC | Calculated/validated from components |
+| total_charges | NUMERIC | System-calculated; default 0 |
 | broker_execution_id | VARCHAR | Nullable; useful for imports/deduplication |
 | notes | TEXT | Nullable |
 | created_at | TIMESTAMPTZ | Required |
 
 ### Execution charge model
 
-Charges are recorded per execution so every broker transaction can retain its actual costs:
+Pipsgox Journal v1 stores **one charge field only**:
 
 ```text
-brokerage
-stt
-exchange_charges
-sebi_charges
-gst
-stamp_duty
-other_charges
-        ↓
-  total_charges
+Total Charges
 ```
+
+`Total Charges` represents all applicable transaction costs for that execution, including brokerage, STT, exchange charges, SEBI charges, GST, stamp duty, and other applicable charges.
+
+The system calculates this total using the supported Zerodha charge-calculation logic. Individual charge components are not stored as separate execution fields in v1.
 
 Trade-level reporting can then calculate:
 
@@ -152,8 +141,6 @@ Gross P&L
    - total execution charges
    = Net P&L
 ```
-
-The individual charge components are retained instead of storing only a single fee total. This supports accurate reporting and future broker-import reconciliation.
 
 ## 8. Position and P&L Rules
 
@@ -164,11 +151,10 @@ The individual charge components are retained instead of storing only a single f
 - Remaining position quantity is calculated from executions.
 - A trade is open while its net position quantity is non-zero.
 - A trade becomes closed when its net position quantity reaches zero.
-- Realized P&L is calculated from execution records using the finalized matching/accounting method.
-- Gross P&L and net P&L must remain distinguishable.
-- Net P&L includes all applicable recorded execution charges.
-
-The exact execution matching method (for example weighted-average or FIFO) must be finalized before production implementation.
+- Realized P&L uses **FIFO (First In, First Out)** as the authoritative execution-matching method.
+- Gross P&L and net P&L remain distinguishable.
+- Net P&L includes all recorded execution-level Total Charges.
+- User-facing trade summaries may show average entry, average exit, quantity, gross P&L, total charges, and net P&L as calculated values.
 
 ## 9. journal_entries
 
@@ -261,6 +247,7 @@ Possible later additions:
 - richer execution/import metadata
 - broker CSV/API imports
 - analytics/materialized reporting structures
+- additional broker charge-calculation engines
 
 These are deliberately not included in v1 until the core model is proven.
 
@@ -269,11 +256,11 @@ These are deliberately not included in v1 until the core model is proven.
 Before creating migrations or application code, finalize:
 
 1. Exact PostgreSQL data types and constraints.
-2. Execution matching/accounting method for realized P&L.
-3. Index strategy.
-4. Delete/cascade behavior.
-5. Authentication API contract.
-6. Session lifetime and expiry policy.
-7. Broker/import reconciliation rules.
+2. Index strategy.
+3. Delete/cascade behavior.
+4. Authentication API contract.
+5. Session lifetime and expiry policy.
+6. Broker/import reconciliation rules.
+7. Exact Zerodha calculation inputs required by the trade-entry workflow.
 
 Only after those decisions are approved should implementation begin.
