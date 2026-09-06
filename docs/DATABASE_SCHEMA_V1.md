@@ -20,6 +20,7 @@ users
   ├── sessions
   ├── trading_accounts
   │      └── trades
+  │             └── executions
   └── journal_entries
 ```
 
@@ -85,9 +86,7 @@ Ownership rule: a trading account can only be accessed through its owning user_i
 
 ## 6. trades
 
-Purpose: central trading-journal record.
-
-Initial conceptual fields:
+Purpose: one trading idea/position. A trade may contain multiple entries and exits.
 
 | Field | Type | Rules |
 |---|---|---|
@@ -95,21 +94,83 @@ Initial conceptual fields:
 | trading_account_id | UUID | Required; FK → trading_accounts.id |
 | symbol | VARCHAR | Required |
 | direction | VARCHAR/enum | Required; long/short |
-| quantity | NUMERIC | Required |
-| entry_price | NUMERIC | Required |
-| exit_price | NUMERIC | Nullable until closed |
-| entry_at | TIMESTAMPTZ | Required |
-| exit_at | TIMESTAMPTZ | Nullable |
-| fees | NUMERIC | Default 0 |
-| realized_pnl | NUMERIC | Nullable until closed/calculated |
+| status | VARCHAR/enum | Calculated; open/closed |
 | setup | VARCHAR | Nullable initially |
+| strategy | VARCHAR | Nullable initially |
 | notes | TEXT | Nullable |
+| opened_at | TIMESTAMPTZ | Calculated/from executions |
+| closed_at | TIMESTAMPTZ | Nullable; calculated/from executions |
 | created_at | TIMESTAMPTZ | Required |
 | updated_at | TIMESTAMPTZ | Required |
 
-The exact trading model will be finalized before implementation, especially handling partial exits, multiple entries, screenshots, tags, and calculated metrics.
+Trade-level values such as total quantity, average entry, average exit, realized P&L, total charges, and holding time should be calculated from executions rather than manually duplicated here.
 
-## 7. journal_entries
+## 7. executions
+
+Purpose: one actual buy/sell execution/fill belonging to a trade. Executions are the source of truth for position and realized P&L calculations.
+
+| Field | Type | Rules |
+|---|---|---|
+| id | UUID | Primary key |
+| trade_id | UUID | Required; FK → trades.id |
+| side | VARCHAR/enum | Required; buy/sell |
+| quantity | NUMERIC | Required; positive |
+| price | NUMERIC | Required; positive |
+| executed_at | TIMESTAMPTZ | Required |
+| brokerage | NUMERIC | Default 0 |
+| stt | NUMERIC | Default 0 |
+| exchange_charges | NUMERIC | Default 0 |
+| sebi_charges | NUMERIC | Default 0 |
+| gst | NUMERIC | Default 0 |
+| stamp_duty | NUMERIC | Default 0 |
+| other_charges | NUMERIC | Default 0 |
+| total_charges | NUMERIC | Calculated/validated from components |
+| broker_execution_id | VARCHAR | Nullable; useful for imports/deduplication |
+| notes | TEXT | Nullable |
+| created_at | TIMESTAMPTZ | Required |
+
+### Execution charge model
+
+Charges are recorded per execution so every broker transaction can retain its actual costs:
+
+```text
+brokerage
+stt
+exchange_charges
+sebi_charges
+gst
+stamp_duty
+other_charges
+        ↓
+  total_charges
+```
+
+Trade-level reporting can then calculate:
+
+```text
+Gross P&L
+   - total execution charges
+   = Net P&L
+```
+
+The individual charge components are retained instead of storing only a single fee total. This supports accurate reporting and future broker-import reconciliation.
+
+## 8. Position and P&L Rules
+
+- A trade is one trading idea/position, regardless of the number of executions.
+- Long trades normally open with buy-side quantity and close with sell-side quantity.
+- Short trades normally open with sell-side quantity and close with buy-side quantity.
+- Partial entries and partial exits are supported.
+- Remaining position quantity is calculated from executions.
+- A trade is open while its net position quantity is non-zero.
+- A trade becomes closed when its net position quantity reaches zero.
+- Realized P&L is calculated from execution records using the finalized matching/accounting method.
+- Gross P&L and net P&L must remain distinguishable.
+- Net P&L includes all applicable recorded execution charges.
+
+The exact execution matching method (for example weighted-average or FIFO) must be finalized before production implementation.
+
+## 9. journal_entries
 
 Purpose: non-trade-specific journal notes and observations.
 
@@ -124,7 +185,7 @@ Purpose: non-trade-specific journal notes and observations.
 | created_at | TIMESTAMPTZ | Required |
 | updated_at | TIMESTAMPTZ | Required |
 
-## 8. Authorization Rule
+## 10. Authorization Rule
 
 Every private request follows:
 
@@ -142,7 +203,7 @@ Query only records owned by / belonging to user_id
 
 The frontend must never be trusted to supply an arbitrary user_id for authorization.
 
-## 9. Database Connection Lifecycle
+## 11. Database Connection Lifecycle
 
 ```text
 Application startup
@@ -170,7 +231,7 @@ Return result
 Release connection to pool
 ```
 
-## 10. Transactions
+## 12. Transactions
 
 Operations that must succeed or fail together use a database transaction.
 
@@ -179,13 +240,14 @@ Example:
 ```text
 BEGIN
   create/update trade
+  insert execution(s)
   create related journal/tag records
 COMMIT
 ```
 
 Any failure causes rollback so partial data is not committed.
 
-## 11. Future Schema Extensions
+## 13. Future Schema Extensions
 
 Possible later additions:
 
@@ -194,23 +256,24 @@ Possible later additions:
 - two-factor authentication
 - device/session management
 - tags
-- setups/strategies
+- setups/strategies as normalized entities
 - screenshots/attachments via object storage
-- trade executions for multiple-entry/multiple-exit trades
-- imported broker executions
+- richer execution/import metadata
+- broker CSV/API imports
 - analytics/materialized reporting structures
 
 These are deliberately not included in v1 until the core model is proven.
 
-## 12. Next Design Step
+## 14. Next Design Step
 
 Before creating migrations or application code, finalize:
 
 1. Exact PostgreSQL data types and constraints.
-2. Trade model, including partial entries/exits.
+2. Execution matching/accounting method for realized P&L.
 3. Index strategy.
 4. Delete/cascade behavior.
 5. Authentication API contract.
 6. Session lifetime and expiry policy.
+7. Broker/import reconciliation rules.
 
 Only after those decisions are approved should implementation begin.
