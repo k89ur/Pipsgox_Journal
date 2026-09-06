@@ -38,10 +38,6 @@ Purpose: identity and account-level information.
 | created_at | TIMESTAMPTZ | Required |
 | updated_at | TIMESTAMPTZ | Required |
 
-Notes:
-- Email comparison/uniqueness policy must be defined consistently during implementation.
-- Password hashing is performed only by the backend.
-
 ## 4. sessions
 
 Purpose: server-side login sessions.
@@ -56,31 +52,23 @@ Purpose: server-side login sessions.
 | last_seen_at | TIMESTAMPTZ | Required |
 | revoked_at | TIMESTAMPTZ | Nullable |
 
-Rules:
-- Store only a hash of the session token server-side.
-- Browser receives only the session credential through a secure cookie mechanism.
-- Revoked or expired sessions cannot authenticate requests.
-- Multiple sessions per user are allowed.
-
 ### Session Policy v1
 
-- Normal login session: **7 days**.
-- `Remember this device` OFF: 7-day session.
-- `Remember this device` ON: **30-day** session.
-- No separate short idle timeout in v1; expiry is based on the session lifetime.
-- Logout immediately revokes the current session and clears the browser cookie.
-- Multiple devices/sessions are allowed; logging out one device does not revoke other sessions.
-- Expired/revoked sessions return `401 Unauthorized`; the UI returns the user to Login without losing journal data.
-- Session credentials are delivered through a secure `HttpOnly` cookie. Production cookies must use `Secure` and an appropriate `SameSite` policy.
+- Normal login: 7 days.
+- Remember this device OFF: 7 days.
+- Remember this device ON: 30 days.
+- No separate short idle timeout in v1.
+- Logout revokes the current session and clears its cookie.
+- Multiple device sessions are allowed.
+- Expired/revoked sessions return 401.
+- Session credential uses a secure HttpOnly cookie; production also uses Secure and an appropriate SameSite policy.
 
 Indexes:
-- Unique index on session token hash.
-- Index on user_id.
-- Index supporting expiry cleanup.
+- Unique session_token_hash.
+- user_id.
+- expires_at for cleanup.
 
 ## 5. trading_accounts
-
-Purpose: separate trading accounts/brokers belonging to a user.
 
 | Field | Type | Rules |
 |---|---|---|
@@ -93,11 +81,9 @@ Purpose: separate trading accounts/brokers belonging to a user.
 | created_at | TIMESTAMPTZ | Required |
 | updated_at | TIMESTAMPTZ | Required |
 
-Ownership rule: a trading account can only be accessed through its owning user_id.
-
 ## 6. trades
 
-Purpose: one trading idea/position. A trade may contain multiple entries and exits.
+A trade is one trading idea/position and may contain multiple entries and exits.
 
 | Field | Type | Rules |
 |---|---|---|
@@ -114,11 +100,11 @@ Purpose: one trading idea/position. A trade may contain multiple entries and exi
 | created_at | TIMESTAMPTZ | Required |
 | updated_at | TIMESTAMPTZ | Required |
 
-Trade-level values such as total quantity, average entry, average exit, realized P&L, total charges, and holding time should be calculated from executions rather than manually duplicated here.
+Trade summaries such as average entry, average exit, realized P&L, total charges, and holding time are derived from executions.
 
 ## 7. executions
 
-Purpose: one actual buy/sell execution/fill belonging to a trade. Executions are the source of truth for position and realized P&L calculations.
+One actual buy/sell entry or exit belonging to a trade.
 
 | Field | Type | Rules |
 |---|---|---|
@@ -128,54 +114,65 @@ Purpose: one actual buy/sell execution/fill belonging to a trade. Executions are
 | quantity | NUMERIC | Required; positive |
 | price | NUMERIC | Required; positive |
 | executed_at | TIMESTAMPTZ | Required |
-| total_charges | NUMERIC | System-calculated; default 0 |
-| broker_execution_id | VARCHAR | Nullable; useful for imports/deduplication |
+| total_charges | NUMERIC | User input; required/default 0; must be >= 0 |
+| broker_execution_id | VARCHAR | Nullable; useful for future imports |
 | notes | TEXT | Nullable |
 | created_at | TIMESTAMPTZ | Required |
 
-### Execution charge model
+### Total Charges — v1 locked rule
 
-Pipsgox Journal v1 stores **one charge field only**:
+Pipsgox Journal does **not** calculate brokerage or statutory charges in v1.
+
+There is only one user-entered field:
 
 ```text
 Total Charges
 ```
 
-`Total Charges` represents all applicable transaction costs for that execution, including brokerage, STT, exchange charges, SEBI charges, GST, stamp duty, and other applicable charges.
+It represents the combined brokerage, taxes, duties and other charges for that execution.
 
-The system calculates this total using the supported Zerodha charge-calculation logic. Individual charge components are not stored as separate execution fields in v1.
+**Total Charges must appear on both the Entry Position form and the Exit Position form**, because charges may be incurred on both buy and sell transactions.
 
-Trade-level reporting can then calculate:
+For a trade with multiple executions:
+
+```text
+Entry execution 1 → Total Charges
+Entry execution 2 → Total Charges
+Exit execution 1  → Total Charges
+Exit execution 2  → Total Charges
+```
+
+Trade-level total charges are the sum of all execution `total_charges` values.
 
 ```text
 Gross P&L
-   - total execution charges
+   - Entry-side Total Charges
+   - Exit-side Total Charges
    = Net P&L
 ```
 
+No Zerodha charge calculator or broker-specific charge-calculation engine is required for v1.
+
 ## 8. Position and P&L Rules
 
-- A trade is one trading idea/position, regardless of the number of executions.
-- Long trades normally open with buy-side quantity and close with sell-side quantity.
-- Short trades normally open with sell-side quantity and close with buy-side quantity.
+- One trade represents one trading idea/position.
+- Long trades normally open with buy executions and close with sell executions.
+- Short trades normally open with sell executions and close with buy executions.
 - Partial entries and partial exits are supported.
-- Remaining position quantity is calculated from executions.
-- A trade is open while its net position quantity is non-zero.
-- A trade becomes closed when its net position quantity reaches zero.
-- Realized P&L uses **FIFO (First In, First Out)** as the authoritative execution-matching method.
-- Gross P&L and net P&L remain distinguishable.
-- Net P&L includes all recorded execution-level Total Charges.
-- User-facing trade summaries may show average entry, average exit, quantity, gross P&L, total charges, and net P&L as calculated values.
+- Remaining position quantity is derived from executions.
+- A trade is open while net position quantity is non-zero.
+- It is closed when net position quantity reaches zero.
+- Realized P&L uses FIFO (First In, First Out).
+- Gross P&L and Net P&L remain separate.
+- Net P&L deducts Total Charges from all entry and exit executions.
 
 ## 9. journal_entries
-
-Purpose: non-trade-specific journal notes and observations.
 
 | Field | Type | Rules |
 |---|---|---|
 | id | UUID | Primary key |
 | user_id | UUID | Required; FK → users.id |
-| trade_id | UUID | Nullable; FK → trades.id when applicable |
+| trade_id | UUID | Nullable; FK → trades.id |
 | title | VARCHAR | Nullable initially |
 | content | TEXT | Required |
 | entry_at | TIMESTAMPTZ | Required |
@@ -183,8 +180,6 @@ Purpose: non-trade-specific journal notes and observations.
 | updated_at | TIMESTAMPTZ | Required |
 
 ## 10. Authorization Rule
-
-Every private request follows:
 
 ```text
 Request
@@ -195,10 +190,10 @@ Get authenticated user_id
   ↓
 Authorize requested resource
   ↓
-Query only records owned by / belonging to user_id
+Query only records belonging to that user
 ```
 
-The frontend must never be trusted to supply an arbitrary user_id for authorization.
+Frontend-supplied user_id is never trusted for authorization.
 
 ## 11. Database Connection Lifecycle
 
@@ -212,66 +207,27 @@ Create PostgreSQL connection pool
 Run migrations / health checks
   ↓
 Accept requests
-
-Request
-  ↓
-Authentication
-  ↓
-Authorization
-  ↓
-Acquire pooled DB connection
-  ↓
-Parameterized query or transaction
-  ↓
-Return result
-  ↓
-Release connection to pool
 ```
+
+Requests acquire a pooled connection, execute parameterized queries/transactions, then release it back to the pool.
 
 ## 12. Transactions
 
-Operations that must succeed or fail together use a database transaction.
-
-Example:
-
-```text
-BEGIN
-  create/update trade
-  insert execution(s)
-  create related journal/tag records
-COMMIT
-```
-
-Any failure causes rollback so partial data is not committed.
+Operations that must succeed/fail together use a database transaction so partially saved trades are not committed.
 
 ## 13. Future Schema Extensions
 
-Possible later additions:
+Possible later additions include email verification, password reset, 2FA, tags, normalized strategies/setups, screenshots, broker imports and analytics structures.
 
-- email verification
-- password reset tokens
-- two-factor authentication
-- device/session management
-- tags
-- setups/strategies as normalized entities
-- screenshots/attachments via object storage
-- richer execution/import metadata
-- broker CSV/API imports
-- analytics/materialized reporting structures
-- additional broker charge-calculation engines
+## 14. Remaining Design Steps
 
-These are deliberately not included in v1 until the core model is proven.
-
-## 14. Next Design Step
-
-Before creating migrations or application code, finalize:
+Before migrations/application code:
 
 1. Exact PostgreSQL data types and constraints.
 2. Index strategy.
 3. Delete/cascade behavior.
 4. Authentication API contract.
-5. Session lifetime and expiry policy. **Done — Session Policy v1 locked above.**
-6. Broker/import reconciliation rules.
-7. Exact Zerodha calculation inputs required by the trade-entry workflow.
+5. Session policy — done.
+6. Broker/import reconciliation rules can be deferred until broker import is planned.
 
-Only after those decisions are approved should implementation begin.
+The Zerodha calculation-input requirement has been removed from v1.
