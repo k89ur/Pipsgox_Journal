@@ -1,4 +1,4 @@
-import { query } from '../db/client.js';
+import { pool, query } from '../db/client.js';
 
 export type UserRecord = {
   id: string;
@@ -31,6 +31,41 @@ export async function createUser(
     [email, passwordHash, displayName],
   );
   return result.rows[0];
+}
+
+export async function createUserAndSession(
+  email: string,
+  passwordHash: string,
+  displayName: string,
+  sessionTokenHash: string,
+  expiresAt: Date,
+): Promise<UserRecord> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const userResult = await client.query<UserRecord>(
+      `INSERT INTO users (email, password_hash, display_name)
+       VALUES ($1, $2, $3)
+       RETURNING id, email, password_hash, display_name, status`,
+      [email, passwordHash, displayName],
+    );
+    const user = userResult.rows[0];
+
+    await client.query(
+      `INSERT INTO sessions (user_id, session_token_hash, expires_at)
+       VALUES ($1, $2, $3)`,
+      [user.id, sessionTokenHash, expiresAt],
+    );
+
+    await client.query('COMMIT');
+    return user;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createSession(
