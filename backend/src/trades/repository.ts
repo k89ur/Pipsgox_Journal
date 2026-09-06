@@ -1,4 +1,4 @@
-import { query } from '../db/client.js';
+import { pool, query } from '../db/client.js';
 
 export type TradeRecord = {
   id: string;
@@ -76,4 +76,52 @@ export async function listExecutions(userId: string, tradeId: string): Promise<E
     [tradeId, userId],
   );
   return result.rows;
+}
+
+export async function createExecution(
+  userId: string,
+  tradeId: string,
+  input: {
+    side: 'buy' | 'sell';
+    quantity: number;
+    price: number;
+    executedAt: Date;
+    totalCharges: number;
+    brokerExecutionId: string | null;
+    notes: string | null;
+  },
+): Promise<ExecutionRecord | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const tradeResult = await client.query<TradeRecord>(
+      `SELECT t.id, t.trading_account_id, t.symbol, t.direction, t.setup, t.strategy, t.notes, t.created_at, t.updated_at
+         FROM trades t
+         JOIN trading_accounts a ON a.id = t.trading_account_id
+        WHERE t.id = $1 AND a.user_id = $2
+        FOR UPDATE OF t`,
+      [tradeId, userId],
+    );
+    if (!tradeResult.rows[0]) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    const result = await client.query<ExecutionRecord>(
+      `INSERT INTO executions
+        (trade_id, side, quantity, price, executed_at, total_charges, broker_execution_id, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, trade_id, side, quantity, price, executed_at, total_charges, broker_execution_id, notes, created_at`,
+      [tradeId, input.side, input.quantity, input.price, input.executedAt, input.totalCharges, input.brokerExecutionId, input.notes],
+    );
+
+    await client.query('COMMIT');
+    return result.rows[0] ?? null;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
