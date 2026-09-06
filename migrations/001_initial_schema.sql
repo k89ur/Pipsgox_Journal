@@ -1,7 +1,6 @@
 -- Pipsgox Journal — Initial PostgreSQL Schema v1
 -- Status: Planning-approved migration baseline
-
-BEGIN;
+-- Transaction is managed by the migration runner.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -49,18 +48,13 @@ CREATE TABLE trades (
     trading_account_id UUID NOT NULL REFERENCES trading_accounts(id) ON DELETE CASCADE,
     symbol VARCHAR(50) NOT NULL,
     direction VARCHAR(10) NOT NULL,
-    status VARCHAR(10) NOT NULL DEFAULT 'open',
     setup VARCHAR(100),
     strategy VARCHAR(100),
     notes TEXT,
-    opened_at TIMESTAMPTZ,
-    closed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT trades_direction_check CHECK (direction IN ('long', 'short')),
-    CONSTRAINT trades_status_check CHECK (status IN ('open', 'closed')),
-    CONSTRAINT trades_closed_at_check CHECK (closed_at IS NULL OR opened_at IS NULL OR closed_at >= opened_at)
+    CONSTRAINT trades_direction_check CHECK (direction IN ('long', 'short'))
 );
 
 CREATE TABLE executions (
@@ -92,23 +86,14 @@ CREATE TABLE journal_entries (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Authentication/session indexes.
 CREATE INDEX idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
-
--- User-owned account and journal lookup indexes.
 CREATE INDEX idx_trading_accounts_user_id ON trading_accounts(user_id);
 CREATE INDEX idx_journal_entries_user_id ON journal_entries(user_id);
 CREATE INDEX idx_journal_entries_trade_id ON journal_entries(trade_id);
-
--- Trade/execution lookup indexes.
 CREATE INDEX idx_trades_account_id ON trades(trading_account_id);
-CREATE INDEX idx_trades_account_status ON trades(trading_account_id, status);
 CREATE INDEX idx_executions_trade_id_executed_at ON executions(trade_id, executed_at, created_at);
 
--- Future broker import deduplication. Multiple NULLs remain allowed.
 CREATE UNIQUE INDEX idx_executions_broker_execution_id
     ON executions(broker_execution_id)
     WHERE broker_execution_id IS NOT NULL;
-
-COMMIT;
