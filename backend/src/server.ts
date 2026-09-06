@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { URL } from 'node:url';
 import { checkDatabaseConnection, closeDatabasePool } from './db/pool.js';
 import { loginHandler, logoutHandler, meHandler, signupHandler, type AuthRequest, type AuthResponse } from './auth/http.js';
@@ -29,6 +30,7 @@ import {
   updateJournalEntryHandler,
 } from './journal/http.js';
 import { applyCors, applySecurityHeaders, isJsonContentType } from './http/security.js';
+import { ApiError, normalizeHttpError } from './http/errors.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === 'production';
@@ -50,19 +52,21 @@ function parseCookies(header: string | undefined): Record<string, string> {
 
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   const declaredLength = Number(req.headers['content-length'] ?? 0);
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) throw new Error('BODY_TOO_LARGE');
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) throw new ApiError(413, 'BODY_TOO_LARGE');
 
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buffer = Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) throw new Error('BODY_TOO_LARGE');
+    if (size > MAX_BODY_BYTES) throw new ApiError(413, 'BODY_TOO_LARGE');
     chunks.push(buffer);
   }
   if (!chunks.length) return {};
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('INVALID_JSON_BODY');
+  let parsed: unknown;
+  try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw new ApiError(400, 'INVALID_JSON_BODY'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new ApiError(400, 'INVALID_JSON_BODY');
   return parsed as Record<string, unknown>;
 }
 
@@ -85,7 +89,7 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
   const isBodyMethod = method === 'POST' || method === 'PATCH';
   const hasBody = Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding'] !== undefined;
   if (isBodyMethod && hasBody && !isJsonContentType(req.headers['content-type'])) {
-    throw new Error('UNSUPPORTED_MEDIA_TYPE');
+    throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE');
   }
 
   const authRequest: AuthRequest = {
@@ -112,6 +116,7 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
     if (method === 'GET' && accountId) return getAccountHandler(accountRequest);
     if (method === 'PATCH' && accountId) return updateAccountHandler(accountRequest);
     if (method === 'DELETE' && accountId) return deleteAccountHandler(accountRequest);
+    throw new ApiError(405, 'METHOD_NOT_ALLOWED');
   }
 
   if (url.pathname === '/trades' || url.pathname.startsWith('/trades/')) {
@@ -121,12 +126,12 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
     const tradeId = segments[1];
     const accountId = url.searchParams.get('account_id') ?? undefined;
     const tradeRequest = { ...authRequest, user, tradeId, accountId };
-
     if (method === 'POST' && segments.length === 1) return createTradeHandler(tradeRequest);
     if (method === 'GET' && segments.length === 1) return listTradesHandler(tradeRequest);
     if (method === 'GET' && segments.length === 2) return getTradeHandler(tradeRequest);
     if (method === 'POST' && segments.length === 3 && segments[2] === 'executions') return createExecutionHandler(tradeRequest);
     if (method === 'GET' && segments.length === 3 && segments[2] === 'summary') return getTradeSummaryHandler(tradeRequest);
+    throw new ApiError(405, 'METHOD_NOT_ALLOWED');
   }
 
   if (url.pathname === '/journal' || url.pathname.startsWith('/journal/')) {
@@ -139,13 +144,15 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
     if (method === 'GET' && entryId) return getJournalEntryHandler(journalRequest);
     if (method === 'PATCH' && entryId) return updateJournalEntryHandler(journalRequest);
     if (method === 'DELETE' && entryId) return deleteJournalEntryHandler(journalRequest);
+    throw new ApiError(405, 'METHOD_NOT_ALLOWED');
   }
 
-  return { status: 404, body: { error: 'NOT_FOUND' } };
+  throw new ApiError(404, 'NOT_FOUND');
 }
 
-function sendResponse(res: http.ServerResponse, result: AuthResponse): void {
+function sendResponse(res: http.ServerResponse, result: AuthResponse, requestId: string): void {
   res.statusCode = result.status;
+  res.setHeader('X-Request-Id', requestId);
   if (result.status !== 204) res.setHeader('Content-Type', 'application/json; charset=utf-8');
   if (result.setCookie) res.setHeader('Set-Cookie', serializeCookie(result.setCookie.name, result.setCookie.value, result.setCookie.options));
   else if (result.clearCookie) res.setHeader('Set-Cookie', serializeCookie(result.clearCookie.name, '', { ...result.clearCookie.options, expires: new Date(0) }));
@@ -154,25 +161,25 @@ function sendResponse(res: http.ServerResponse, result: AuthResponse): void {
 }
 
 export const server = http.createServer(async (req, res) => {
+  const requestId = randomUUID();
   applySecurityHeaders(res);
+  res.setHeader('X-Request-Id', requestId);
+
   if (!applyCors(req, res)) {
-    res.statusCode = 403;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: 'CORS_FORBIDDEN' }));
+    const error = new ApiError(403, 'CORS_FORBIDDEN');
+    sendResponse(res, { status: error.status, body: { error: error.code, request_id: requestId } }, requestId);
     return;
   }
 
   try {
-    sendResponse(res, await route(req));
+    sendResponse(res, await route(req), requestId);
   } catch (error) {
-    const code = error instanceof Error ? error.message : 'INTERNAL_ERROR';
-    const status = code === 'BODY_TOO_LARGE' ? 413
-      : code === 'INVALID_JSON_BODY' ? 400
-      : code === 'UNSUPPORTED_MEDIA_TYPE' ? 415
-      : 500;
-    res.statusCode = status;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: status === 500 ? 'INTERNAL_ERROR' : code }));
+    const apiError = normalizeHttpError(error);
+    if (apiError.status >= 500) console.error(`[${requestId}]`, error);
+    sendResponse(res, {
+      status: apiError.status,
+      body: { error: apiError.code, request_id: requestId },
+    }, requestId);
   }
 });
 
