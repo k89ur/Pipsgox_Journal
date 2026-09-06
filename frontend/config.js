@@ -1,3 +1,3 @@
-// Set this when the frontend and API are hosted on different origins.
-// Example: window.PIPSGOX_API_BASE = 'https://api.example.com';
-window.PIPSGOX_API_BASE = '';
+// Render deployment uses the API service URL below.
+// Update this value if the Render service receives a different public URL.
+window.PIPSGOX_API_BASE = 'https://pipsgox-journal-api.onrender.com';
