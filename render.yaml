@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: pipsgox-journal-api
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+
+  - type: web
+    name: pipsgox-journal-web
+    runtime: static
+    rootDir: frontend
+    plan: free
+    buildCommand: npm run check
+    staticPublishPath: .
+    autoDeployTrigger: checksPass
