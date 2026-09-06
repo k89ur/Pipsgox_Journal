@@ -28,26 +28,36 @@ import {
   listJournalEntriesHandler,
   updateJournalEntryHandler,
 } from './journal/http.js';
+import { applyCors, applySecurityHeaders, isJsonContentType } from './http/security.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === 'production';
+const MAX_BODY_BYTES = 1_000_000;
 
 function parseCookies(header: string | undefined): Record<string, string> {
   if (!header) return {};
-  return Object.fromEntries(header.split(';').map((part) => {
+  const cookies: Record<string, string> = {};
+  for (const part of header.split(';')) {
     const index = part.indexOf('=');
-    if (index < 0) return [part.trim(), ''];
-    return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())];
-  }));
+    if (index < 0) continue;
+    const name = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (!name) continue;
+    try { cookies[name] = decodeURIComponent(value); } catch { /* ignore malformed cookie */ }
+  }
+  return cookies;
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  const declaredLength = Number(req.headers['content-length'] ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) throw new Error('BODY_TOO_LARGE');
+
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buffer = Buffer.from(chunk);
     size += buffer.length;
-    if (size > 1_000_000) throw new Error('BODY_TOO_LARGE');
+    if (size > MAX_BODY_BYTES) throw new Error('BODY_TOO_LARGE');
     chunks.push(buffer);
   }
   if (!chunks.length) return {};
@@ -69,7 +79,15 @@ function serializeCookie(name: string, value: string, options: Record<string, un
 async function route(req: http.IncomingMessage): Promise<AuthResponse> {
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', 'http://localhost');
+
+  if (method === 'OPTIONS') return { status: 204, body: {} };
+
   const isBodyMethod = method === 'POST' || method === 'PATCH';
+  const hasBody = Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding'] !== undefined;
+  if (isBodyMethod && hasBody && !isJsonContentType(req.headers['content-type'])) {
+    throw new Error('UNSUPPORTED_MEDIA_TYPE');
+  }
+
   const authRequest: AuthRequest = {
     body: isBodyMethod ? await readJsonBody(req) : {},
     cookies: parseCookies(req.headers.cookie),
@@ -136,15 +154,31 @@ function sendResponse(res: http.ServerResponse, result: AuthResponse): void {
 }
 
 export const server = http.createServer(async (req, res) => {
-  try { sendResponse(res, await route(req)); }
-  catch (error) {
+  applySecurityHeaders(res);
+  if (!applyCors(req, res)) {
+    res.statusCode = 403;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'CORS_FORBIDDEN' }));
+    return;
+  }
+
+  try {
+    sendResponse(res, await route(req));
+  } catch (error) {
     const code = error instanceof Error ? error.message : 'INTERNAL_ERROR';
-    const status = code === 'INVALID_JSON_BODY' || code === 'BODY_TOO_LARGE' ? 400 : 500;
+    const status = code === 'BODY_TOO_LARGE' ? 413
+      : code === 'INVALID_JSON_BODY' ? 400
+      : code === 'UNSUPPORTED_MEDIA_TYPE' ? 415
+      : 500;
     res.statusCode = status;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: status === 400 ? code : 'INTERNAL_ERROR' }));
+    res.end(JSON.stringify({ error: status === 500 ? 'INTERNAL_ERROR' : code }));
   }
 });
+
+server.headersTimeout = 10_000;
+server.requestTimeout = 30_000;
+server.keepAliveTimeout = 5_000;
 
 async function start(): Promise<void> {
   await checkDatabaseConnection();
