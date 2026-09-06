@@ -55,7 +55,7 @@ export async function loginHandler(req: AuthRequest): Promise<AuthResponse> {
     const result = await login({
       email: String(req.body?.email ?? ''),
       password: String(req.body?.password ?? ''),
-      rememberDevice: Boolean(req.body?.remember_device),
+      rememberDevice: req.body?.remember_device === true,
     });
 
     return {
