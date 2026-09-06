@@ -1,5 +1,6 @@
 import { calculateFifo, type FifoExecution } from './fifo.js';
 import {
+  createExecution,
   createTrade,
   findTradeById,
   listExecutions,
@@ -34,6 +35,24 @@ function optionalText(value: unknown, max: number, code: string): string | null 
   return text || null;
 }
 
+function positiveNumber(value: unknown, code: string): number {
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(number) || number <= 0) throw new Error(code);
+  return number;
+}
+
+function nonNegativeNumber(value: unknown, code: string): number {
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(number) || number < 0) throw new Error(code);
+  return number;
+}
+
+function validateExecutedAt(value: unknown): Date {
+  const date = new Date(String(value ?? ''));
+  if (!value || Number.isNaN(date.getTime())) throw new Error('INVALID_EXECUTED_AT');
+  return date;
+}
+
 function publicTrade(trade: TradeRecord) {
   return {
     id: trade.id,
@@ -58,12 +77,7 @@ export async function createTradingTrade(userId: string, input: Record<string, u
   const notes = optionalText(input.notes, 10_000, 'INVALID_NOTES');
 
   const trade = await createTrade(userId, {
-    tradingAccountId: String(input.trading_account_id),
-    symbol,
-    direction,
-    setup,
-    strategy,
-    notes,
+    tradingAccountId: String(input.trading_account_id), symbol, direction, setup, strategy, notes,
   });
   if (!trade) throw new Error('ACCOUNT_NOT_FOUND');
   return publicTrade(trade);
@@ -82,6 +96,30 @@ export async function getTradingTrades(userId: string, accountId?: string) {
   return (await listTrades(userId, accountId)).map(publicTrade);
 }
 
+export async function createTradingExecution(userId: string, tradeId: string, input: Record<string, unknown>) {
+  requireUserId(userId);
+  if (!UUID_RE.test(tradeId)) throw new Error('INVALID_TRADE_ID');
+  if (input.side !== 'buy' && input.side !== 'sell') throw new Error('INVALID_SIDE');
+  const quantity = positiveNumber(input.quantity, 'INVALID_QUANTITY');
+  const price = positiveNumber(input.price, 'INVALID_PRICE');
+  const executedAt = validateExecutedAt(input.executed_at);
+  const totalCharges = nonNegativeNumber(input.total_charges ?? 0, 'INVALID_TOTAL_CHARGES');
+  const brokerExecutionId = optionalText(input.broker_execution_id, 150, 'INVALID_BROKER_EXECUTION_ID');
+  const notes = optionalText(input.notes, 10_000, 'INVALID_NOTES');
+
+  const execution = await createExecution(userId, tradeId, {
+    side: input.side,
+    quantity,
+    price,
+    executedAt,
+    totalCharges,
+    brokerExecutionId,
+    notes,
+  });
+  if (!execution) throw new Error('TRADE_NOT_FOUND');
+  return execution;
+}
+
 export async function getTradeSummary(userId: string, tradeId: string) {
   requireUserId(userId);
   if (!UUID_RE.test(tradeId)) return null;
@@ -90,10 +128,7 @@ export async function getTradeSummary(userId: string, tradeId: string) {
 
   const executions = await listExecutions(userId, tradeId);
   const fifoExecutions: FifoExecution[] = executions.map((execution) => ({
-    side: execution.side,
-    quantity: Number(execution.quantity),
-    price: Number(execution.price),
-    totalCharges: Number(execution.total_charges),
+    side: execution.side, quantity: Number(execution.quantity), price: Number(execution.price), totalCharges: Number(execution.total_charges),
   }));
   const result = calculateFifo(trade.direction, fifoExecutions);
   const firstExecution = executions[0]?.executed_at ?? null;
