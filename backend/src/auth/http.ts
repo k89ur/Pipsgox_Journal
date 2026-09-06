@@ -18,6 +18,7 @@ export type AuthRequest = {
 export type AuthResponse = {
   status: number;
   body: Record<string, unknown>;
+  headers?: Record<string, string>;
   setCookie?: { name: string; value: string; options: ReturnType<typeof sessionCookieOptions> };
   clearCookie?: { name: string; options: ReturnType<typeof clearSessionCookieOptions> };
 };
