@@ -57,10 +57,7 @@ function publicEntry(entry: JournalEntry) {
   };
 }
 
-export async function createEntry(
-  userId: string,
-  input: { trade_id?: unknown; title?: unknown; content: unknown; entry_at: unknown },
-) {
+export async function createEntry(userId: string, input: Record<string, unknown>) {
   requireUserId(userId);
   const tradeId = validateTradeId(input.trade_id);
   const title = validateTitle(input.title);
