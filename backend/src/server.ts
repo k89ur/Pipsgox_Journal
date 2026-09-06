@@ -4,6 +4,14 @@ import { URL } from 'node:url';
 import { checkDatabaseConnection, closeDatabasePool } from './db/pool.js';
 import { loginHandler, logoutHandler, meHandler, signupHandler, type AuthRequest, type AuthResponse } from './auth/http.js';
 import { SESSION_COOKIE } from './auth/session.js';
+import {
+  authenticateAccountRequest,
+  createAccountHandler,
+  deleteAccountHandler,
+  getAccountHandler,
+  listAccountsHandler,
+  updateAccountHandler,
+} from './accounts/http.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === 'production';
@@ -45,8 +53,9 @@ function serializeCookie(name: string, value: string, options: Record<string, un
 async function route(req: http.IncomingMessage): Promise<AuthResponse> {
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', 'http://localhost');
+  const isBodyMethod = method === 'POST' || method === 'PATCH';
   const authRequest: AuthRequest = {
-    body: method === 'POST' ? await readJsonBody(req) : {},
+    body: isBodyMethod ? await readJsonBody(req) : {},
     cookies: parseCookies(req.headers.cookie),
   };
 
@@ -59,12 +68,26 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
     return { status: 200, body: { status: 'ok', database: 'ok' } };
   }
 
+  if (url.pathname === '/accounts' || url.pathname.startsWith('/accounts/')) {
+    const user = await authenticateAccountRequest(authRequest.cookies?.[SESSION_COOKIE]);
+    if (!user) return { status: 401, body: { error: 'UNAUTHENTICATED' } };
+
+    const accountId = url.pathname.startsWith('/accounts/') ? url.pathname.slice('/accounts/'.length) : undefined;
+    const accountRequest = { ...authRequest, user, accountId };
+
+    if (method === 'POST' && url.pathname === '/accounts') return createAccountHandler(accountRequest);
+    if (method === 'GET' && url.pathname === '/accounts') return listAccountsHandler(accountRequest);
+    if (method === 'GET' && accountId) return getAccountHandler(accountRequest);
+    if (method === 'PATCH' && accountId) return updateAccountHandler(accountRequest);
+    if (method === 'DELETE' && accountId) return deleteAccountHandler(accountRequest);
+  }
+
   return { status: 404, body: { error: 'NOT_FOUND' } };
 }
 
 function sendResponse(res: http.ServerResponse, result: AuthResponse): void {
   res.statusCode = result.status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  if (result.status !== 204) res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (result.setCookie) {
     res.setHeader('Set-Cookie', serializeCookie(result.setCookie.name, result.setCookie.value, result.setCookie.options));
