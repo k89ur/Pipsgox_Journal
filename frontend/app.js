@@ -65,8 +65,11 @@
     const wins = closed.filter(s=>Number(s.net_realized_pnl)>0).length;
     const winRate = closed.length ? `${Math.round(wins/closed.length*100)}%` : '—';
     const open = state.trades.filter(t=>state.summaries[t.id]?.status==='OPEN').length;
-    return `<div class="grid"><div class="card"><div class="metric-label">Net realized P&L</div><div class="metric-value ${net>=0?'positive':'negative'}">₹${money(net)}</div></div><div class="card"><div class="metric-label">Closed trades</div><div class="metric-value">${closed.length}</div></div><div class="card"><div class="metric-label">Win rate</div><div class="metric-value">${winRate}</div></div><div class="card"><div class="metric-label">Open trades</div><div class="metric-value">${open}</div></div>
-    </div><div class="section-head"><h2>Recent trades</h2><button class="btn primary" id="newTrade">+ New trade</button></div>${tradeTable(state.trades.slice(0,8))}`;
+    const activeAccounts = state.accounts.filter(a=>a.is_active).length;
+    const recentJournal = state.journal.slice(0,3);
+    return `<div class="dashboard-intro"><div><div class="eyebrow">Trading workspace</div><h2>Welcome back, ${esc(state.user.display_name)}</h2><p>Review your trading activity and keep your journal close to the decisions that matter.</p></div><button class="btn primary" id="newTrade">+ New trade</button></div>
+    <div class="grid dashboard-metrics"><div class="card metric-card"><div class="metric-label">Net realized P&L</div><div class="metric-value ${net>=0?'positive':'negative'}">₹${money(net)}</div><div class="metric-note">Closed trades only</div></div><div class="card metric-card"><div class="metric-label">Closed trades</div><div class="metric-value">${closed.length}</div><div class="metric-note">Completed positions</div></div><div class="card metric-card"><div class="metric-label">Win rate</div><div class="metric-value">${winRate}</div><div class="metric-note">Based on closed trades</div></div><div class="card metric-card"><div class="metric-label">Open trades</div><div class="metric-value">${open}</div><div class="metric-note">${activeAccounts} active account${activeAccounts===1?'':'s'}</div></div></div>
+    <div class="dashboard-columns"><section><div class="section-head"><h2>Recent trades</h2><button class="btn" id="viewTrades">View all</button></div>${tradeTable(state.trades.slice(0,8))}</section><aside><div class="section-head"><h2>Journal</h2><button class="btn" id="viewJournal">View all</button></div>${recentJournal.length ? recentJournal.map(e=>`<article class="card journal-preview"><div class="journal-preview-head"><strong>${esc(e.title||'Untitled entry')}</strong><span class="muted">${date(e.entry_at)}</span></div><p>${esc(e.content)}</p></article>`).join('') : `<div class="card empty">No journal entries yet.</div>`}</aside></div>`;
   }
 
   function tradeTable(trades) {
@@ -93,6 +96,8 @@
     });
     const journal=document.getElementById('newJournal');if(journal)journal.onclick=()=>{const m=modal('New journal entry',`<form class="form" id="journalForm"><div class="field"><label>Title</label><input name="title" maxlength="200" placeholder="What did I learn?" /></div><div class="field"><label>Entry</label><textarea name="content" required placeholder="Record the setup, execution, emotions and lesson..."></textarea></div><div class="field"><label>Date</label><input name="entry_at" type="datetime-local" required /></div><div id="formError"></div><button class="btn primary">Save entry</button></form>`);m.querySelector('#close').onclick=()=>m.remove();m.querySelector('[name=entry_at]').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);m.querySelector('#journalForm').onsubmit=async e=>{e.preventDefault();const p=Object.fromEntries(new FormData(e.currentTarget).entries());p.entry_at=new Date(p.entry_at).toISOString();try{await api('/journal',json('POST',p));m.remove();await loadData();render()}catch(x){m.querySelector('#formError').innerHTML=`<div class="error">${esc(x.message)}</div>`}}};
     const refresh=document.getElementById('refresh');if(refresh)refresh.onclick=async()=>{refresh.disabled=true;await loadData();render()};
+    const viewTrades=document.getElementById('viewTrades');if(viewTrades)viewTrades.onclick=()=>{state.tab='trades';render()};
+    const viewJournal=document.getElementById('viewJournal');if(viewJournal)viewJournal.onclick=()=>{state.tab='journal';render()};
   }
 
   function openExecution(trade){
