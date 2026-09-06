@@ -6,6 +6,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "tsx --test test/**/*.test.ts",
     "start": "node dist/server.js",
     "migrate": "node dist/db/migrate.js",
     "dev": "tsx src/server.ts"
