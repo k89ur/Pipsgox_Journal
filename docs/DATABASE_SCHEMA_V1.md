@@ -62,6 +62,17 @@ Rules:
 - Revoked or expired sessions cannot authenticate requests.
 - Multiple sessions per user are allowed.
 
+### Session Policy v1
+
+- Normal login session: **7 days**.
+- `Remember this device` OFF: 7-day session.
+- `Remember this device` ON: **30-day** session.
+- No separate short idle timeout in v1; expiry is based on the session lifetime.
+- Logout immediately revokes the current session and clears the browser cookie.
+- Multiple devices/sessions are allowed; logging out one device does not revoke other sessions.
+- Expired/revoked sessions return `401 Unauthorized`; the UI returns the user to Login without losing journal data.
+- Session credentials are delivered through a secure `HttpOnly` cookie. Production cookies must use `Secure` and an appropriate `SameSite` policy.
+
 Indexes:
 - Unique index on session token hash.
 - Index on user_id.
@@ -259,7 +270,7 @@ Before creating migrations or application code, finalize:
 2. Index strategy.
 3. Delete/cascade behavior.
 4. Authentication API contract.
-5. Session lifetime and expiry policy.
+5. Session lifetime and expiry policy. **Done — Session Policy v1 locked above.**
 6. Broker/import reconciliation rules.
 7. Exact Zerodha calculation inputs required by the trade-entry workflow.
 
