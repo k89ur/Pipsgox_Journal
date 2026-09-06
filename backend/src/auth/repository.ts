@@ -1,11 +1,11 @@
-import { query } from "../db/client";
+import { query } from '../db/client.js';
 
 export type UserRecord = {
   id: string;
   email: string;
   password_hash: string;
   display_name: string;
-  status: "active" | "inactive" | "blocked";
+  status: 'active' | 'inactive' | 'blocked';
 };
 
 export async function findUserByEmail(email: string): Promise<UserRecord | null> {
