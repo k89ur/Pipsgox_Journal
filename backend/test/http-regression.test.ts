@@ -53,13 +53,11 @@ test('non-JSON body returns 415', async () => {
 });
 
 test('oversized request returns 413', async () => {
+  const oversizedBody = 'x'.repeat(1_000_001);
   const response = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'content-length': '1000001',
-    },
-    body: '{}',
+    headers: { 'content-type': 'application/json' },
+    body: oversizedBody,
   });
   assert.equal(response.status, 413);
   const body = await response.json() as { error: string };
