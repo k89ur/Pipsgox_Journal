@@ -32,9 +32,7 @@ test('account creation validates required fields', async () => {
   );
 });
 
-test('account creation normalizes currency before persistence', async () => {
-  // The validation path accepts lowercase currency codes and normalizes them to uppercase.
-  // Database access is intentionally not reached in this unit test.
+test('account creation rejects malformed currency before database access', async () => {
   await expectError(
     () => createTradingAccount(USER_ID, { name: 'Trading', baseCurrency: 'US1' }),
     'INVALID_CURRENCY',
