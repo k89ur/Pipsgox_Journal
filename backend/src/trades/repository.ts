@@ -1,4 +1,5 @@
 import { pool, query } from '../db/client.js';
+import { calculateFifo } from './fifo.js';
 
 export type TradeRecord = {
   id: string;
@@ -103,10 +104,34 @@ export async function createExecution(
         FOR UPDATE OF t`,
       [tradeId, userId],
     );
-    if (!tradeResult.rows[0]) {
+    const trade = tradeResult.rows[0];
+    if (!trade) {
       await client.query('ROLLBACK');
       return null;
     }
+
+    const existing = await client.query<ExecutionRecord>(
+      `SELECT id, trade_id, side, quantity, price, executed_at, total_charges, broker_execution_id, notes, created_at
+         FROM executions
+        WHERE trade_id = $1
+        ORDER BY executed_at ASC, created_at ASC`,
+      [tradeId],
+    );
+
+    calculateFifo(trade.direction, [
+      ...existing.rows.map((execution) => ({
+        side: execution.side,
+        quantity: Number(execution.quantity),
+        price: Number(execution.price),
+        totalCharges: Number(execution.total_charges),
+      })),
+      {
+        side: input.side,
+        quantity: input.quantity,
+        price: input.price,
+        totalCharges: input.totalCharges,
+      },
+    ]);
 
     const result = await client.query<ExecutionRecord>(
       `INSERT INTO executions
