@@ -6,7 +6,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test test/**/*.test.ts",
+    "test": "tsx --test test/*.test.ts",
     "start": "node dist/server.js",
     "migrate": "node dist/db/migrate.js",
     "dev": "tsx src/server.ts"
@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
-    "@types/node": "^22.10.2",
+    "@types/node": "^22.10.10",
     "@types/pg": "^8.10.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
