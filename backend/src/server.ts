@@ -5,35 +5,13 @@ import { URL } from 'node:url';
 import { checkDatabaseConnection, closeDatabasePool } from './db/pool.js';
 import { loginHandler, logoutHandler, meHandler, signupHandler, type AuthRequest, type AuthResponse } from './auth/http.js';
 import { SESSION_COOKIE } from './auth/session.js';
-import {
-  authenticateAccountRequest,
-  createAccountHandler,
-  deleteAccountHandler,
-  getAccountHandler,
-  listAccountsHandler,
-  updateAccountHandler,
-} from './accounts/http.js';
-import {
-  authenticateTradeRequest,
-  createExecutionHandler,
-  createTradeHandler,
-  getTradeHandler,
-  getTradeSummaryHandler,
-  listTradesHandler,
-} from './trades/http.js';
-import {
-  authenticateJournalRequest,
-  createJournalEntryHandler,
-  deleteJournalEntryHandler,
-  getJournalEntryHandler,
-  listJournalEntriesHandler,
-  updateJournalEntryHandler,
-} from './journal/http.js';
+import { authenticateAccountRequest, createAccountHandler, deleteAccountHandler, getAccountHandler, listAccountsHandler, updateAccountHandler } from './accounts/http.js';
+import { authenticateTradeRequest, createExecutionHandler, createTradeHandler, getTradeHandler, getTradeSummaryHandler, listTradesHandler } from './trades/http.js';
+import { authenticateJournalRequest, createJournalEntryHandler, deleteJournalEntryHandler, getJournalEntryHandler, listJournalEntriesHandler, updateJournalEntryHandler } from './journal/http.js';
 import { applyCors, applySecurityHeaders, isJsonContentType } from './http/security.js';
 import { ApiError, normalizeHttpError } from './http/errors.js';
 
 const port = Number(process.env.PORT ?? 3000);
-const isProduction = process.env.NODE_ENV === 'production';
 const MAX_BODY_BYTES = 1_000_000;
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -53,7 +31,6 @@ function parseCookies(header: string | undefined): Record<string, string> {
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   const declaredLength = Number(req.headers['content-length'] ?? 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) throw new ApiError(413, 'BODY_TOO_LARGE');
-
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -83,20 +60,13 @@ function serializeCookie(name: string, value: string, options: Record<string, un
 async function route(req: http.IncomingMessage): Promise<AuthResponse> {
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', 'http://localhost');
-
   if (method === 'OPTIONS') return { status: 204, body: {} };
 
   const isBodyMethod = method === 'POST' || method === 'PATCH';
   const hasBody = Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding'] !== undefined;
-  if (isBodyMethod && hasBody && !isJsonContentType(req.headers['content-type'])) {
-    throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE');
-  }
+  if (isBodyMethod && hasBody && !isJsonContentType(req.headers['content-type'])) throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE');
 
-  const authRequest: AuthRequest = {
-    body: isBodyMethod ? await readJsonBody(req) : {},
-    cookies: parseCookies(req.headers.cookie),
-  };
-
+  const authRequest: AuthRequest = { body: isBodyMethod ? await readJsonBody(req) : {}, cookies: parseCookies(req.headers.cookie) };
   if (method === 'POST' && url.pathname === '/auth/signup') return signupHandler(authRequest);
   if (method === 'POST' && url.pathname === '/auth/login') return loginHandler(authRequest);
   if (method === 'GET' && url.pathname === '/auth/me') return meHandler(authRequest);
@@ -146,7 +116,6 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
     if (method === 'DELETE' && entryId) return deleteJournalEntryHandler(journalRequest);
     throw new ApiError(405, 'METHOD_NOT_ALLOWED');
   }
-
   throw new ApiError(404, 'NOT_FOUND');
 }
 
@@ -164,22 +133,17 @@ export const server = http.createServer(async (req, res) => {
   const requestId = randomUUID();
   applySecurityHeaders(res);
   res.setHeader('X-Request-Id', requestId);
-
   if (!applyCors(req, res)) {
     const error = new ApiError(403, 'CORS_FORBIDDEN');
     sendResponse(res, { status: error.status, body: { error: error.code, request_id: requestId } }, requestId);
     return;
   }
-
   try {
     sendResponse(res, await route(req), requestId);
   } catch (error) {
     const apiError = normalizeHttpError(error);
     if (apiError.status >= 500) console.error(`[${requestId}]`, error);
-    sendResponse(res, {
-      status: apiError.status,
-      body: { error: apiError.code, request_id: requestId },
-    }, requestId);
+    sendResponse(res, { status: apiError.status, body: { error: apiError.code, request_id: requestId } }, requestId);
   }
 });
 
@@ -202,7 +166,7 @@ async function shutdown(signal: string): Promise<void> {
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
-if (!isProduction || process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test') {
   start().catch(async (error) => {
     console.error('Backend startup failed:', error);
     await closeDatabasePool();
