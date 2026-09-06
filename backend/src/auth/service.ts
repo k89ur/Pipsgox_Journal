@@ -1,6 +1,6 @@
 import {
   createSession,
-  createUser,
+  createUserAndSession,
   findSessionUser,
   findUserByEmail,
   revokeSession,
@@ -40,10 +40,16 @@ export async function signup(input: {
 
   if (await findUserByEmail(email)) throw new Error('AUTH_FAILED');
 
-  const user = await createUser(email, await hashPassword(input.password), displayName);
+  const passwordHash = await hashPassword(input.password);
   const token = createSessionToken();
   const expiresAt = sessionExpiry(false);
-  await createSession(user.id, hashSessionToken(token), expiresAt);
+  const user = await createUserAndSession(
+    email,
+    passwordHash,
+    displayName,
+    hashSessionToken(token),
+    expiresAt,
+  );
 
   return { user: publicUser(user), token, expiresAt };
 }
