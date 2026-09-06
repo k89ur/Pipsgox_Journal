@@ -3,12 +3,12 @@ import {
   login,
   logout,
   signup,
-} from "./service";
+} from './service.js';
 import {
   clearSessionCookieOptions,
   SESSION_COOKIE,
   sessionCookieOptions,
-} from "./session";
+} from './session.js';
 
 export type AuthRequest = {
   cookies?: Record<string, string | undefined>;
@@ -22,14 +22,14 @@ export type AuthResponse = {
   clearCookie?: { name: string; options: ReturnType<typeof clearSessionCookieOptions> };
 };
 
-const production = process.env.NODE_ENV === "production";
+const production = process.env.NODE_ENV === 'production';
 
 export async function signupHandler(req: AuthRequest): Promise<AuthResponse> {
   try {
     const result = await signup({
-      email: String(req.body?.email ?? ""),
-      password: String(req.body?.password ?? ""),
-      displayName: String(req.body?.display_name ?? ""),
+      email: String(req.body?.email ?? ''),
+      password: String(req.body?.password ?? ''),
+      displayName: String(req.body?.display_name ?? ''),
     });
 
     return {
@@ -42,19 +42,19 @@ export async function signupHandler(req: AuthRequest): Promise<AuthResponse> {
       },
     };
   } catch (error) {
-    const code = error instanceof Error ? error.message : "UNKNOWN";
-    if (code === "INVALID_EMAIL" || code === "INVALID_PASSWORD" || code === "INVALID_DISPLAY_NAME") {
+    const code = error instanceof Error ? error.message : 'UNKNOWN';
+    if (code === 'INVALID_EMAIL' || code === 'INVALID_PASSWORD' || code === 'INVALID_DISPLAY_NAME') {
       return { status: 400, body: { error: code } };
     }
-    return { status: 409, body: { error: "AUTH_FAILED" } };
+    return { status: 409, body: { error: 'AUTH_FAILED' } };
   }
 }
 
 export async function loginHandler(req: AuthRequest): Promise<AuthResponse> {
   try {
     const result = await login({
-      email: String(req.body?.email ?? ""),
-      password: String(req.body?.password ?? ""),
+      email: String(req.body?.email ?? ''),
+      password: String(req.body?.password ?? ''),
       rememberDevice: Boolean(req.body?.remember_device),
     });
 
@@ -68,13 +68,13 @@ export async function loginHandler(req: AuthRequest): Promise<AuthResponse> {
       },
     };
   } catch {
-    return { status: 401, body: { error: "AUTH_FAILED" } };
+    return { status: 401, body: { error: 'AUTH_FAILED' } };
   }
 }
 
 export async function meHandler(req: AuthRequest): Promise<AuthResponse> {
   const user = await authenticateSession(req.cookies?.[SESSION_COOKIE]);
-  if (!user) return { status: 401, body: { error: "UNAUTHENTICATED" } };
+  if (!user) return { status: 401, body: { error: 'UNAUTHENTICATED' } };
 
   return {
     status: 200,
