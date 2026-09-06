@@ -153,7 +153,7 @@ server.keepAliveTimeout = 5_000;
 
 async function start(): Promise<void> {
   await checkDatabaseConnection();
-  server.listen(port, () => console.log(`Backend ready on port ${port}.`));
+  server.listen(port, '0.0.0.0', () => console.log(`Backend ready on port ${port}.`));
 }
 
 async function shutdown(signal: string): Promise<void> {
