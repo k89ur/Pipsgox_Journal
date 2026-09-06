@@ -1,0 +1,11 @@
+{
+  "name": "pipsgox-journal-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "check": "node --check app.js"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
