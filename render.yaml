@@ -21,7 +21,6 @@ services:
     name: pipsgox-journal-web
     runtime: static
     rootDir: frontend
-    plan: free
     buildCommand: npm run check
     staticPublishPath: .
     autoDeployTrigger: checksPass
