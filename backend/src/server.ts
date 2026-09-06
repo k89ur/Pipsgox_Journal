@@ -12,6 +12,14 @@ import {
   listAccountsHandler,
   updateAccountHandler,
 } from './accounts/http.js';
+import {
+  authenticateTradeRequest,
+  createExecutionHandler,
+  createTradeHandler,
+  getTradeHandler,
+  getTradeSummaryHandler,
+  listTradesHandler,
+} from './trades/http.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === 'production';
@@ -71,15 +79,28 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
   if (url.pathname === '/accounts' || url.pathname.startsWith('/accounts/')) {
     const user = await authenticateAccountRequest(authRequest.cookies?.[SESSION_COOKIE]);
     if (!user) return { status: 401, body: { error: 'UNAUTHENTICATED' } };
-
     const accountId = url.pathname.startsWith('/accounts/') ? url.pathname.slice('/accounts/'.length) : undefined;
     const accountRequest = { ...authRequest, user, accountId };
-
     if (method === 'POST' && url.pathname === '/accounts') return createAccountHandler(accountRequest);
     if (method === 'GET' && url.pathname === '/accounts') return listAccountsHandler(accountRequest);
     if (method === 'GET' && accountId) return getAccountHandler(accountRequest);
     if (method === 'PATCH' && accountId) return updateAccountHandler(accountRequest);
     if (method === 'DELETE' && accountId) return deleteAccountHandler(accountRequest);
+  }
+
+  if (url.pathname === '/trades' || url.pathname.startsWith('/trades/')) {
+    const user = await authenticateTradeRequest(authRequest.cookies?.[SESSION_COOKIE]);
+    if (!user) return { status: 401, body: { error: 'UNAUTHENTICATED' } };
+    const segments = url.pathname.split('/').filter(Boolean);
+    const tradeId = segments[1];
+    const accountId = url.searchParams.get('account_id') ?? undefined;
+    const tradeRequest = { ...authRequest, user, tradeId, accountId };
+
+    if (method === 'POST' && segments.length === 1) return createTradeHandler(tradeRequest);
+    if (method === 'GET' && segments.length === 1) return listTradesHandler(tradeRequest);
+    if (method === 'GET' && segments.length === 2) return getTradeHandler(tradeRequest);
+    if (method === 'POST' && segments.length === 3 && segments[2] === 'executions') return createExecutionHandler(tradeRequest);
+    if (method === 'GET' && segments.length === 3 && segments[2] === 'summary') return getTradeSummaryHandler(tradeRequest);
   }
 
   return { status: 404, body: { error: 'NOT_FOUND' } };
@@ -88,24 +109,15 @@ async function route(req: http.IncomingMessage): Promise<AuthResponse> {
 function sendResponse(res: http.ServerResponse, result: AuthResponse): void {
   res.statusCode = result.status;
   if (result.status !== 204) res.setHeader('Content-Type', 'application/json; charset=utf-8');
-
-  if (result.setCookie) {
-    res.setHeader('Set-Cookie', serializeCookie(result.setCookie.name, result.setCookie.value, result.setCookie.options));
-  } else if (result.clearCookie) {
-    res.setHeader('Set-Cookie', serializeCookie(result.clearCookie.name, '', { ...result.clearCookie.options, expires: new Date(0) }));
-  }
-
-  if (result.status === 204) {
-    res.end();
-    return;
-  }
+  if (result.setCookie) res.setHeader('Set-Cookie', serializeCookie(result.setCookie.name, result.setCookie.value, result.setCookie.options));
+  else if (result.clearCookie) res.setHeader('Set-Cookie', serializeCookie(result.clearCookie.name, '', { ...result.clearCookie.options, expires: new Date(0) }));
+  if (result.status === 204) { res.end(); return; }
   res.end(JSON.stringify(result.body));
 }
 
 export const server = http.createServer(async (req, res) => {
-  try {
-    sendResponse(res, await route(req));
-  } catch (error) {
+  try { sendResponse(res, await route(req)); }
+  catch (error) {
     const code = error instanceof Error ? error.message : 'INTERNAL_ERROR';
     const status = code === 'INVALID_JSON_BODY' || code === 'BODY_TOO_LARGE' ? 400 : 500;
     res.statusCode = status;
@@ -116,9 +128,7 @@ export const server = http.createServer(async (req, res) => {
 
 async function start(): Promise<void> {
   await checkDatabaseConnection();
-  server.listen(port, () => {
-    console.log(`Backend ready on port ${port}.`);
-  });
+  server.listen(port, () => console.log(`Backend ready on port ${port}.`));
 }
 
 async function shutdown(signal: string): Promise<void> {
