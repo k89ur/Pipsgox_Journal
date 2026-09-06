@@ -5,17 +5,17 @@ import {
   findUserByEmail,
   revokeSession,
   type UserRecord,
-} from "./repository";
-import { hashPassword, verifyPassword } from "./password";
-import { createSessionToken, hashSessionToken, sessionExpiry } from "./session";
+} from './repository.js';
+import { hashPassword, verifyPassword } from './password.js';
+import { createSessionToken, hashSessionToken, sessionExpiry } from './session.js';
 import {
   normalizeEmail,
   validateDisplayName,
   validateEmail,
   validatePassword,
-} from "./validation";
+} from './validation.js';
 
-export type PublicUser = Pick<UserRecord, "id" | "email" | "display_name" | "status">;
+export type PublicUser = Pick<UserRecord, 'id' | 'email' | 'display_name' | 'status'>;
 
 function publicUser(user: UserRecord): PublicUser {
   return {
@@ -34,17 +34,18 @@ export async function signup(input: {
   const email = normalizeEmail(input.email);
   const displayName = input.displayName.trim();
 
-  if (!validateEmail(email)) throw new Error("INVALID_EMAIL");
-  if (!validatePassword(input.password)) throw new Error("INVALID_PASSWORD");
-  if (!validateDisplayName(displayName)) throw new Error("INVALID_DISPLAY_NAME");
+  if (!validateEmail(email)) throw new Error('INVALID_EMAIL');
+  if (!validatePassword(input.password)) throw new Error('INVALID_PASSWORD');
+  if (!validateDisplayName(displayName)) throw new Error('INVALID_DISPLAY_NAME');
 
-  if (await findUserByEmail(email)) throw new Error("AUTH_FAILED");
+  if (await findUserByEmail(email)) throw new Error('AUTH_FAILED');
 
   const user = await createUser(email, await hashPassword(input.password), displayName);
   const token = createSessionToken();
-  await createSession(user.id, hashSessionToken(token), sessionExpiry(false));
+  const expiresAt = sessionExpiry(false);
+  await createSession(user.id, hashSessionToken(token), expiresAt);
 
-  return { user: publicUser(user), token, expiresAt: sessionExpiry(false) };
+  return { user: publicUser(user), token, expiresAt };
 }
 
 export async function login(input: {
@@ -55,8 +56,8 @@ export async function login(input: {
   const email = normalizeEmail(input.email);
   const user = await findUserByEmail(email);
 
-  if (!user || user.status !== "active" || !(await verifyPassword(input.password, user.password_hash))) {
-    throw new Error("AUTH_FAILED");
+  if (!user || user.status !== 'active' || !(await verifyPassword(input.password, user.password_hash))) {
+    throw new Error('AUTH_FAILED');
   }
 
   const token = createSessionToken();
