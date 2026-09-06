@@ -37,12 +37,20 @@ test('normal and remembered session expiry use the approved durations', () => {
   assert.equal(REMEMBERED_SESSION_DAYS, 30);
 });
 
-test('session cookie is HttpOnly and SameSite=Lax', () => {
+test('production session cookie supports credentialed cross-origin frontend', () => {
   const expires = new Date('2026-01-08T00:00:00.000Z');
   const options = sessionCookieOptions(true, expires);
   assert.equal(options.httpOnly, true);
   assert.equal(options.secure, true);
-  assert.equal(options.sameSite, 'lax');
+  assert.equal(options.sameSite, 'none');
   assert.equal(options.path, '/');
   assert.equal(options.expires, expires);
+});
+
+test('development session cookie remains SameSite=Lax', () => {
+  const options = sessionCookieOptions(false, new Date('2026-01-08T00:00:00.000Z'));
+  assert.equal(options.httpOnly, true);
+  assert.equal(options.secure, false);
+  assert.equal(options.sameSite, 'lax');
+  assert.equal(options.path, '/');
 });
