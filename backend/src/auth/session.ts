@@ -21,7 +21,9 @@ export function sessionCookieOptions(isProduction: boolean, expires: Date) {
   return {
     httpOnly: true,
     secure: isProduction,
-    sameSite: "lax" as const,
+    // The frontend and API are separate origins in production. None is required
+    // for credentialed cross-origin fetches; Secure is enforced alongside it.
+    sameSite: isProduction ? ("none" as const) : ("lax" as const),
     path: "/",
     expires,
   };
@@ -31,7 +33,7 @@ export function clearSessionCookieOptions(isProduction: boolean) {
   return {
     httpOnly: true,
     secure: isProduction,
-    sameSite: "lax" as const,
+    sameSite: isProduction ? ("none" as const) : ("lax" as const),
     path: "/",
   };
 }
